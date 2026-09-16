@@ -277,6 +277,23 @@ export default async function agent({
 	headers.set("x-polyrouter-model", choice.id);
 	headers.set("x-polyrouter-tier", choice.tier);
 	headers.set("x-polyrouter-why", choice.why.replace(/[^\x20-\x7e]/g, "?"));
+
+	// The gateway strips upstream headers, so for non-streaming JSON
+	// responses the trace also goes into the body as `polyrouter_trace`.
+	const isStream = body.stream === true;
+	const contentType = upstream.headers.get("content-type") ?? "";
+	if (!isStream && contentType.includes("application/json")) {
+		const payload = (await upstream.json()) as Record<string, unknown>;
+		payload.polyrouter_trace = {
+			model: choice.id,
+			tier: choice.tier,
+			why: choice.why,
+		};
+		return new Response(JSON.stringify(payload), {
+			status: upstream.status,
+			headers,
+		});
+	}
 	return new Response(upstream.body, {
 		status: upstream.status,
 		headers,
