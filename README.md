@@ -17,16 +17,21 @@ deterministic), then lets live platform data make the final pick.
 1. **Classify (pure code)** - scans the Responses request: prompt length,
    code fences, reasoning keywords, conversation length, images, tools.
    Produces a tier: `fast`, `balanced`, or `deep`.
-2. **Live data** - `GET /v1/models?status=all` (price, capabilities,
-   health) and `GET /v1/models/status?minutes=30` (p95 latency, tokens/sec),
-   fetched in parallel through the agent's `pollinations()` helper.
-3. **Pick** - healthy text models that satisfy the request's capability needs
+2. **Live data** - `GET /v1/models?status=all` (price, capabilities) and
+   `GET /models/status?minutes=30` (raw per-model rollups: 2xx/5xx counts,
+   p95 latency, tokens/sec), fetched in parallel through the agent's
+   `pollinations()` helper. The status feed is aggregated in code into
+   per-model health: a model is skipped only when the majority of its recent
+   calls failed with 5xx (4xx are client faults; low-traffic models get the
+   benefit of the doubt). When the status feed is unreachable the router
+   degrades gracefully to price-only routing.
+3. **Pick** - eligible text models that satisfy the request's capability needs
    (image input, `tool_calling`; `deep` also requires `reasoning`), sorted by
    unit price with live p95 latency as tiebreak:
    - `fast` -> cheapest candidate
    - `balanced` -> median-priced candidate
    - `deep` -> priciest (strongest) candidate
-   - empty band escalates upward; last resort is any healthy text model
+   - empty band escalates upward; last resort is any eligible text model
 4. **Forward** - the original request body goes to `/v1/responses` with only
    `model` replaced. The gateway still applies the model's own declared
    fallbacks - this agent chooses between models, it does not retry one.
@@ -38,7 +43,7 @@ Every response carries a trace on headers:
 ```
 x-polyrouter-model: inception/mercury-2.5-preview
 x-polyrouter-tier: fast
-x-polyrouter-why: score 0; simple prompt; picked cheapest healthy of 87; skipped 21 health down, ...
+x-polyrouter-why: score 0; simple prompt; picked cheapest eligible of 87; skipped 21 unhealthy (5xx), ...
 ```
 
 Three requests routed differently, with reasons: see [`demos/`](demos/).
